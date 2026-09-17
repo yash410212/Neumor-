@@ -25,8 +25,13 @@ jobs:
           unzip -q "$ZIP_NAME" -d "$PROJECT_DIR"
           shopt -s nullglob
           dirs=("$PROJECT_DIR"/*/)
-          if [ ${#dirs[@]} -eq 1 ] && [ -f "${dirs[0]}/settings.gradle" -o -f "${dirs[0]}/settings.gradle.kts" -o -f "${dirs[0]}/build.gradle" -o -f "${dirs[0]}/build.gradle.kts" ]; then
-            echo "BUILD_ROOT=${dirs[0]%/}" >> "$GITHUB_ENV"
+          if [ ${#dirs[@]} -eq 1 ] && [ -d "${dirs[0]}" ]; then
+            candidate="${dirs[0]%/}"
+            if [ -f "$candidate/settings.gradle" ] || [ -f "$candidate/settings.gradle.kts" ] || [ -f "$candidate/build.gradle" ] || [ -f "$candidate/build.gradle.kts" ] || [ -f "$candidate/gradlew" ]; then
+              echo "BUILD_ROOT=$candidate" >> "$GITHUB_ENV"
+            else
+              echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
+            fi
           else
             echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
           fi
@@ -52,38 +57,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find . -type f \( -name build.gradle -o -name build.gradle.kts \) -print0 | while IFS= read -r -d '' f; do
-            sed -i -E 's/(compileSdk[[:space:]]*=?[[:space:]]*)35\b/\136/g; s/(compileSdkVersion[[:space:]]*=?[[:space:]]*)35\b/\136/g' "$f"
-          done
+          while IFS= read -r -d '' file; do
+            sed -i -E 's/(compileSdk([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
+            sed -i -E 's/(compileSdkVersion([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
+          done < <(find . -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print0)
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/src/main/java/com/example/modernlauncher/MainActivity.kt')
           s=p.read_text()
           s=s.replace('import androidx.compose.runtime.composed\n','')
+          s=s.replace('import androidx.compose.material3.isSystemInDarkTheme\n','')
           if 'import androidx.compose.foundation.horizontalScroll' not in s:
               s=s.replace('import androidx.compose.foundation.rememberScrollState\n','import androidx.compose.foundation.rememberScrollState\nimport androidx.compose.foundation.horizontalScroll\n')
-          s=s.replace('import androidx.compose.material3.isSystemInDarkTheme\n','')
           if 'import androidx.compose.foundation.isSystemInDarkTheme' not in s:
               s=s.replace('import androidx.compose.material3.*\n','import androidx.compose.material3.*\nimport androidx.compose.foundation.isSystemInDarkTheme\n')
           s=s.replace('val spanY: Int = 2\n)', 'val spanY: Int = 2,\n    val providerKey: String = ""\n)')
-          s=s.replace('p.getString("iconScales", "")', 'p.getString("iconScales", "").orEmpty()')
-          s=s.replace('p.getString("widgets_home", "")', 'p.getString("widgets_home", "").orEmpty()')
-          s=s.replace('onNewIntent(intent:Intent?)','onNewIntent(intent:Intent)')
+          s=s.replace('decodeIconScales(p.getString("iconScales", ""))','decodeIconScales(p.getString("iconScales", "").orEmpty())')
+          s=s.replace('decodeWidgets(p.getString("widgets_home", ""))','decodeWidgets(p.getString("widgets_home", "").orEmpty())')
+          s=s.replace('override fun onNewIntent(intent:Intent?){ super.onNewIntent(intent); setIntent(intent) }','override fun onNewIntent(intent:Intent){ super.onNewIntent(intent); setIntent(intent) }')
           s=s.replace('onAddWidget={activity?.let { { it.pickWidget() } } ?: {}}','onAddWidget={ activity?.pickWidget(); Unit }')
           s=s.replace('@Composable private fun ThemeChoice(', '@Composable private fun RowScope.ThemeChoice(')
-          s=s.replace('private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=composedClickable(onClick)\n@Composable private fun composedClickable(onClick:()->Unit):Modifier{val interaction=remember{androidx.compose.foundation.interaction.MutableInteractionSource()};return Modifier.then(Modifier.clickable(interactionSource=interaction,indication=null,onClick=onClick))}', 'private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=Modifier.clickable(interactionSource=androidx.compose.foundation.interaction.MutableInteractionSource(),indication=null,onClick=onClick)')
-          s=s.replace('val cell=((maxWidth.toPx()-gap*(cols-1))/cols).coerceAtLeast(1f)', 'val cell=(with(density){maxWidth.toPx()}-gap*(cols-1))/cols.coerceAtLeast(1).toFloat()')
-          s=s.replace('(86.dp.value*density+gap)', '(with(density){86.dp.toPx()}+gap)')
-          # Keep wallpaper call inside Activity receiver rather than LocalContext lookup in a draw/callback expression.
-          s=s.replace('(LocalContext.current as? MainActivity)?.pickWallpaper()', 'edgeContext.pickWallpaper()')
-          s=s.replace('@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){', '@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){\n    val edgeContext=LocalContext.current')
-          # Fix EdgeAction parameter mismatches without changing UI.
+          s=s.replace('val cell=((maxWidth.toPx()-gap*(cols-1))/cols).coerceAtLeast(1f)','val cell=(with(density){maxWidth.toPx()}-gap*(cols-1))/cols.coerceAtMost(5).coerceAtLeast(1).toFloat()')
+          s=s.replace('(86.dp.value*density+gap)','(with(density){86.dp.toPx()}+gap)')
+          s=s.replace('private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=composedClickable(onClick)\n@Composable private fun composedClickable(onClick:()->Unit):Modifier{val interaction=remember{androidx.compose.foundation.interaction.MutableInteractionSource()};return Modifier.then(Modifier.clickable(interactionSource=interaction,indication=null,onClick=onClick))}','private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=Modifier.clickable(interactionSource=androidx.compose.foundation.interaction.MutableInteractionSource(),indication=null,onClick=onClick)')
+          # EdgePanel: keep the Android Activity reference typed correctly.
           s=s.replace('EdgeAction("Apps","Open app drawer",accent)', 'EdgeAction("Apps","Open app drawer",accent,muted)')
           s=s.replace('EdgeAction("Settings","Launcher controls",accent)', 'EdgeAction("Settings","Launcher controls",accent,muted)')
           s=s.replace('EdgeAction("Theme","Toggle light / dark",accent)', 'EdgeAction("Theme","Toggle light / dark",accent,muted)')
           s=s.replace('EdgeAction("Grid","Change home grid",accent)', 'EdgeAction("Grid","Change home grid",accent,muted)')
-          s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){edgeContext.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){edgeContext.pickWallpaper();onClose()}')
+          s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){(LocalContext.current as? MainActivity)?.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){hostActivity?.pickWallpaper();onClose()}')
+          s=s.replace('@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){', '@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){\n    val hostActivity=LocalContext.current as? MainActivity')
+          s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){edgeContext.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){hostActivity?.pickWallpaper();onClose()}')
           s=s.replace('@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,onClick:()->Unit)', '@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,muted:Color,onClick:()->Unit)')
+          # AnalogClock: capture dark mode in composable scope, then use the captured Boolean in drawBehind.
+          marker='@Composable private fun AnalogClock(text:Color){'
+          start=s.find(marker)
+          if start>=0:
+              end=s.find('\n@Composable',start+len(marker))
+              if end<0: end=len(s)
+              block=s[start:end]
+              block=block.replace('val now=remember{mutableStateOf(Calendar.getInstance())}', 'val now=remember{mutableStateOf(Calendar.getInstance())}\n    val dark=androidx.compose.foundation.isSystemInDarkTheme()')
+              block=block.replace('if(isSystemInDarkTheme())','if(dark)')
+              block=block.replace('if(isSystemInDarkTheme())','if(dark)')
+              s=s[:start]+block+s[end:]
           p.write_text(s)
           PY
 
