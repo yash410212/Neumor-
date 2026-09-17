@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Extract Android project ZIP
         shell: bash
         run: |
@@ -35,23 +34,18 @@ jobs:
           else
             echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
           fi
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
-
       - name: Install Android SDK
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.1'
-
       - name: Prepare and patch source
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
@@ -61,19 +55,16 @@ jobs:
             sed -i -E 's/(compileSdk([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
             sed -i -E 's/(compileSdkVersion([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
           done < <(find . -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print0)
-
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/src/main/java/com/example/modernlauncher/MainActivity.kt')
           s=p.read_text()
-
           s=s.replace('import androidx.compose.runtime.composed\n','')
           s=s.replace('import androidx.compose.material3.isSystemInDarkTheme\n','')
           if 'import androidx.compose.foundation.horizontalScroll' not in s:
               s=s.replace('import androidx.compose.foundation.rememberScrollState\n','import androidx.compose.foundation.rememberScrollState\nimport androidx.compose.foundation.horizontalScroll\n')
           if 'import androidx.compose.foundation.isSystemInDarkTheme' not in s:
               s=s.replace('import androidx.compose.material3.*\n','import androidx.compose.material3.*\nimport androidx.compose.foundation.isSystemInDarkTheme\n')
-
           s=s.replace('val spanY: Int = 2\n)', 'val spanY: Int = 2,\n    val providerKey: String = ""\n)')
           s=s.replace('decodeIconScales(p.getString("iconScales", ""))','decodeIconScales(p.getString("iconScales", "").orEmpty())')
           s=s.replace('decodeWidgets(p.getString("widgets_home", ""))','decodeWidgets(p.getString("widgets_home", "").orEmpty())')
@@ -83,8 +74,6 @@ jobs:
           s=s.replace('val cell=((maxWidth.toPx()-gap*(cols-1))/cols).coerceAtLeast(1f)','val cell=(with(density){maxWidth.toPx()}-gap*(cols-1))/cols.coerceAtMost(5).coerceAtLeast(1).toFloat()')
           s=s.replace('(86.dp.value*density+gap)','(with(density){86.dp.toPx()}+gap)')
           s=s.replace('private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=composedClickable(onClick)\n@Composable private fun composedClickable(onClick:()->Unit):Modifier{val interaction=remember{androidx.compose.foundation.interaction.MutableInteractionSource()};return Modifier.then(Modifier.clickable(interactionSource=interaction,indication=null,onClick=onClick))}','private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=Modifier.clickable(interactionSource=androidx.compose.foundation.interaction.MutableInteractionSource(),indication=null,onClick=onClick)')
-
-          # Edge panel: Activity is captured in composable scope; callbacks remain non-composable.
           edge='@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){'
           s=s.replace(edge, edge+'\n    val hostActivity=LocalContext.current as? MainActivity')
           s=s.replace('EdgeAction("Apps","Open app drawer",accent)', 'EdgeAction("Apps","Open app drawer",accent,muted)')
@@ -93,8 +82,6 @@ jobs:
           s=s.replace('EdgeAction("Grid","Change home grid",accent)', 'EdgeAction("Grid","Change home grid",accent,muted)')
           s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){(LocalContext.current as? MainActivity)?.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){hostActivity?.pickWallpaper();onClose()}')
           s=s.replace('@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,onClick:()->Unit)', '@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,muted:Color,onClick:()->Unit)')
-
-          # Analog clock: obtain the composable value before entering drawBehind.
           marker='@Composable private fun AnalogClock(text:Color){'
           start=s.find(marker)
           if start>=0:
@@ -105,17 +92,13 @@ jobs:
                   block=block.replace(marker, marker+'\n    val dark=androidx.compose.foundation.isSystemInDarkTheme()', 1)
               block=block.replace('if(isSystemInDarkTheme())','if(dark)')
               s=s[:start]+block+s[end:]
-
           p.write_text(s)
           PY
-
       - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
         run: gradle assembleDebug --stacktrace --no-daemon
-
       - name: Find APK
         run: test -n "$(find "$BUILD_ROOT" -type f -name '*.apk' -print -quit)"
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
