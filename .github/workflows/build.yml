@@ -92,6 +92,18 @@ jobs:
                   block=block.replace(marker, marker+'\n    val dark=androidx.compose.foundation.isSystemInDarkTheme()', 1)
               block=block.replace('if(isSystemInDarkTheme())','if(dark)')
               s=s[:start]+block+s[end:]
+
+          # Kotlin auto-generates JVM setters for public var properties. Rename
+          # explicit setX() methods to avoid identical JVM signatures, and update
+          # call sites without changing the underlying state properties.
+          methods = [
+              'IconSize','IconShape','AnimationValue','AnimationDuration','AnimationType',
+              'IconPadding','TouchResponse','SettingsPage','DrawerListMode','DrawerCategory',
+              'CurrentHomePage','PerformanceMode','ProductiveMode','StudyMode'
+          ]
+          for name in methods:
+              s=s.replace(f'fun set{name}(', f'fun update{name}(')
+              s=s.replace(f'.set{name}(', f'.update{name}(')
           p.write_text(s)
           PY
       - name: Build debug APK
