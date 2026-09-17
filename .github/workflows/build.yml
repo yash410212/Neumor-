@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Extract Android project ZIP
         shell: bash
         run: |
@@ -35,23 +34,18 @@ jobs:
           else
             echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
           fi
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
-
       - name: Install Android SDK
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.1'
-
       - name: Prepare and patch source
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
@@ -80,36 +74,34 @@ jobs:
           s=s.replace('val cell=((maxWidth.toPx()-gap*(cols-1))/cols).coerceAtLeast(1f)','val cell=(with(density){maxWidth.toPx()}-gap*(cols-1))/cols.coerceAtMost(5).coerceAtLeast(1).toFloat()')
           s=s.replace('(86.dp.value*density+gap)','(with(density){86.dp.toPx()}+gap)')
           s=s.replace('private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=composedClickable(onClick)\n@Composable private fun composedClickable(onClick:()->Unit):Modifier{val interaction=remember{androidx.compose.foundation.interaction.MutableInteractionSource()};return Modifier.then(Modifier.clickable(interactionSource=interaction,indication=null,onClick=onClick))}','private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=Modifier.clickable(interactionSource=androidx.compose.foundation.interaction.MutableInteractionSource(),indication=null,onClick=onClick)')
-          # EdgePanel: keep the Android Activity reference typed correctly.
+          # EdgePanel: reference the Activity captured in composable scope.
+          s=s.replace('edgeContext.pickWallpaper()', 'hostActivity?.pickWallpaper()')
+          s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){(LocalContext.current as? MainActivity)?.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){hostActivity?.pickWallpaper();onClose()}')
+          s=s.replace('@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){', '@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){\n    val hostActivity=LocalContext.current as? MainActivity')
           s=s.replace('EdgeAction("Apps","Open app drawer",accent)', 'EdgeAction("Apps","Open app drawer",accent,muted)')
           s=s.replace('EdgeAction("Settings","Launcher controls",accent)', 'EdgeAction("Settings","Launcher controls",accent,muted)')
           s=s.replace('EdgeAction("Theme","Toggle light / dark",accent)', 'EdgeAction("Theme","Toggle light / dark",accent,muted)')
           s=s.replace('EdgeAction("Grid","Change home grid",accent)', 'EdgeAction("Grid","Change home grid",accent,muted)')
-          s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){(LocalContext.current as? MainActivity)?.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){hostActivity?.pickWallpaper();onClose()}')
-          s=s.replace('@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){', '@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){\n    val hostActivity=LocalContext.current as? MainActivity')
-          s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){edgeContext.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){hostActivity?.pickWallpaper();onClose()}')
           s=s.replace('@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,onClick:()->Unit)', '@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,muted:Color,onClick:()->Unit)')
-          # AnalogClock: capture dark mode in composable scope, then use the captured Boolean in drawBehind.
+          # AnalogClock: capture the composable dark-theme value before drawBehind.
           marker='@Composable private fun AnalogClock(text:Color){'
           start=s.find(marker)
           if start>=0:
               end=s.find('\n@Composable',start+len(marker))
               if end<0: end=len(s)
               block=s[start:end]
-              block=block.replace('val now=remember{mutableStateOf(Calendar.getInstance())}', 'val now=remember{mutableStateOf(Calendar.getInstance())}\n    val dark=androidx.compose.foundation.isSystemInDarkTheme()')
-              block=block.replace('if(isSystemInDarkTheme())','if(dark)')
-              block=block.replace('if(isSystemInDarkTheme())','if(dark)')
+              if 'val dark=' not in block:
+                  pos=block.find('\n')+1
+                  block=block[:pos]+'    val dark=androidx.compose.foundation.isSystemInDarkTheme()\n'+block[pos:]
+              block=block.replace('isSystemInDarkTheme()', 'dark')
               s=s[:start]+block+s[end:]
           p.write_text(s)
           PY
-
       - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
         run: gradle assembleDebug --stacktrace --no-daemon
-
       - name: Find APK
         run: test -n "$(find "$BUILD_ROOT" -type f -name '*.apk' -print -quit)"
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
