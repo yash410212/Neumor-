@@ -11,7 +11,6 @@ permissions:
 env:
   ZIP_NAME: ModernLauncher_TecnoSpark8C_VivoY11_UX_v1.5.zip
   PROJECT_DIR: android-project
-  GRADLE_VERSION: '9.5.1'
 
 jobs:
   build:
@@ -28,7 +27,6 @@ jobs:
           rm -rf "$PROJECT_DIR"
           mkdir -p "$PROJECT_DIR"
           unzip -q "$ZIP_NAME" -d "$PROJECT_DIR"
-
           shopt -s nullglob
           dirs=("$PROJECT_DIR"/*/)
           if [ ${#dirs[@]} -eq 1 ] && [ -d "${dirs[0]}" ]; then
@@ -48,15 +46,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Gradle 9.5.1
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/gradle.zip
-          sudo mkdir -p /opt/gradle
-          sudo unzip -q /tmp/gradle.zip -d /opt/gradle
-          echo "/opt/gradle/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
-          "/opt/gradle/gradle-${GRADLE_VERSION}/bin/gradle" --version
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
 
       - name: Prepare project
         working-directory: ${{ env.BUILD_ROOT }}
@@ -65,13 +58,13 @@ jobs:
           set -euo pipefail
           if [ -f ./gradlew ]; then chmod +x ./gradlew; fi
           rm -rf .gradle
+          gradle --version
 
-      - name: Build debug APK with Gradle 9.5.1
+      - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
         run: |
           set -euo pipefail
-          gradle --version
           gradle assembleDebug --stacktrace --no-daemon
 
       - name: Find APK
