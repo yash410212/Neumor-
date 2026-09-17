@@ -78,6 +78,14 @@ jobs:
           grep -RInE 'compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+' --include='build.gradle' --include='build.gradle.kts' . || true
           gradle --version
 
+      - name: Upload source diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: Neumor-source-diagnostic
+          path: ${{ env.BUILD_ROOT }}/app/src/main/java/com/example/modernlauncher/MainActivity.kt
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
