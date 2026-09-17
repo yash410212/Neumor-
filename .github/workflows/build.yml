@@ -55,7 +55,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
       - name: Set up Gradle
@@ -74,17 +73,37 @@ jobs:
             sed -i -E 's/(compileSdk([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
             sed -i -E 's/(compileSdkVersion([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
           done < <(find . -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print0)
-          echo "Effective compileSdk declarations:"
-          grep -RInE 'compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+' --include='build.gradle' --include='build.gradle.kts' . || true
-          gradle --version
 
-      - name: Upload source diagnostic
-        uses: actions/upload-artifact@v4
-        with:
-          name: Neumor-source-diagnostic
-          path: ${{ env.BUILD_ROOT }}/app/src/main/java/com/example/modernlauncher/MainActivity.kt
-          if-no-files-found: error
-          retention-days: 3
+      - name: Patch Kotlin source compatibility
+        working-directory: ${{ env.BUILD_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/example/modernlauncher/MainActivity.kt')
+          s = p.read_text()
+          s = s.replace('import androidx.compose.runtime.composed\n', '')
+          s = s.replace('import androidx.compose.foundation.rememberScrollState\n', 'import androidx.compose.foundation.rememberScrollState\nimport androidx.compose.foundation.horizontalScroll\n')
+          s = s.replace('import androidx.compose.material3.*\n', 'import androidx.compose.material3.*\nimport androidx.compose.material3.isSystemInDarkTheme\n')
+          s = s.replace('data class HomeWidgetRecord(\n    val appWidgetId: Int,\n    val page: Int,\n    val spanX: Int = 2,\n    val spanY: Int = 2\n)', 'data class HomeWidgetRecord(\n    val appWidgetId: Int,\n    val page: Int,\n    val spanX: Int = 2,\n    val spanY: Int = 2,\n    val providerKey: String = ""\n)')
+          s = s.replace('decodeIconScales(p.getString("iconScales", ""))', 'decodeIconScales(p.getString("iconScales", "").orEmpty())')
+          s = s.replace('decodeWidgets(p.getString("widgets_home", ""))', 'decodeWidgets(p.getString("widgets_home", "").orEmpty())')
+          s = s.replace('override fun onNewIntent(intent:Intent?){ super.onNewIntent(intent); setIntent(intent) }', 'override fun onNewIntent(intent:Intent){ super.onNewIntent(intent); setIntent(intent) }')
+          s = s.replace('onAddWidget={activity?.let { { it.pickWidget() } } ?: {}}', 'onAddWidget={ activity?.pickWidget(); Unit }')
+          s = s.replace('EdgeAction("Apps","Open app drawer",accent)', 'EdgeAction("Apps","Open app drawer",accent,muted)')
+          s = s.replace('EdgeAction("Settings","Launcher controls",accent)', 'EdgeAction("Settings","Launcher controls",accent,muted)')
+          s = s.replace('EdgeAction("Theme","Toggle light / dark",accent)', 'EdgeAction("Theme","Toggle light / dark",accent,muted)')
+          s = s.replace('EdgeAction("Grid","Change home grid",accent)', 'EdgeAction("Grid","Change home grid",accent,muted)')
+          s = s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){(LocalContext.current as? MainActivity)?.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){(LocalContext.current as? MainActivity)?.pickWallpaper();onClose()}')
+          s = s.replace('private fun EdgeAction(title:String,subtitle:String,accent:Color,onClick:()->Unit)', 'private fun EdgeAction(title:String,subtitle:String,accent:Color,muted:Color,onClick:()->Unit)')
+          s = s.replace('@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,onClick:()->Unit)', '@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,muted:Color,onClick:()->Unit)')
+          s = s.replace('@Composable private fun ThemeChoice(', '@Composable private fun RowScope.ThemeChoice(')
+          s = s.replace('val cell=((maxWidth.toPx()-gap*(cols-1))/cols).coerceAtLeast(1f)', 'val cell=(with(density){maxWidth.toPx()}-gap*(cols-1))/cols.coerceAtLeast(1).toFloat()')
+          s = s.replace('(86.dp.value*density+gap)', '(with(density){86.dp.toPx()}+gap)')
+          s = s.replace('private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=composedClickable(onClick)\n@Composable private fun composedClickable(onClick:()->Unit):Modifier{val interaction=remember{androidx.compose.foundation.interaction.MutableInteractionSource()};return Modifier.then(Modifier.clickable(interactionSource=interaction,indication=null,onClick=onClick))}', 'private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=Modifier.clickable(interactionSource=androidx.compose.foundation.interaction.MutableInteractionSource(),indication=null,onClick=onClick)')
+          p.write_text(s)
+          PY
 
       - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
