@@ -11,6 +11,9 @@ permissions:
 env:
   ZIP_NAME: ModernLauncher_TecnoSpark8C_VivoY11_UX_v1.5.zip
   PROJECT_DIR: android-project
+  GRADLE_VERSION: '9.5'
+
+auto_cancel: false
 
 jobs:
   build:
@@ -27,8 +30,6 @@ jobs:
           rm -rf "$PROJECT_DIR"
           mkdir -p "$PROJECT_DIR"
           unzip -q "$ZIP_NAME" -d "$PROJECT_DIR"
-          echo 'Extracted project:'
-          find "$PROJECT_DIR" -maxdepth 4 -type f | head -100
 
           shopt -s nullglob
           dirs=("$PROJECT_DIR"/*/)
@@ -48,43 +49,32 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Make Gradle executable
+      - name: Install Gradle 9.5
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/gradle.zip
+          sudo mkdir -p /opt/gradle
+          sudo unzip -q /tmp/gradle.zip -d /opt/gradle
+          echo "/opt/gradle/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+          "/opt/gradle/gradle-${GRADLE_VERSION}/bin/gradle" --version
+
+      - name: Prepare project
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
-          fi
+          if [ -f ./gradlew ]; then chmod +x ./gradlew; fi
+          rm -rf .gradle
 
-      - name: Force compatible Gradle version
+      - name: Build debug APK with Gradle 9.5
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
-            sed -i -E 's#gradle-[0-9]+(\.[0-9]+)+-bin\.zip#gradle-9.5-bin.zip#g' gradle/wrapper/gradle-wrapper.properties
-            echo 'Gradle wrapper configuration:'
-            cat gradle/wrapper/gradle-wrapper.properties
-          fi
-
-      - name: Build debug APK
-        working-directory: ${{ env.BUILD_ROOT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f ./gradlew ]; then
-            ./gradlew --version
-            ./gradlew assembleDebug --stacktrace --no-daemon
-          elif command -v gradle >/dev/null 2>&1; then
-            gradle --version
-            gradle assembleDebug --stacktrace --no-daemon
-          else
-            echo 'No Gradle wrapper or system Gradle found in the extracted project.'
-            exit 1
-          fi
+          gradle --version
+          gradle assembleDebug --stacktrace --no-daemon
 
       - name: Find APK
         shell: bash
