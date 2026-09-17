@@ -1,0 +1,89 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZIP_NAME: ModernLauncher_TecnoSpark8C_VivoY11_UX_v1.5.zip
+  PROJECT_DIR: android-project
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Extract Android project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$ZIP_NAME"
+          rm -rf "$PROJECT_DIR"
+          mkdir -p "$PROJECT_DIR"
+          unzip -q "$ZIP_NAME" -d "$PROJECT_DIR"
+          echo 'Extracted project:'
+          find "$PROJECT_DIR" -maxdepth 3 -type f | head -100
+
+          # If the ZIP contains a single top-level directory, build from it.
+          dirs=("$PROJECT_DIR"/*/)
+          if [ ${#dirs[@]} -eq 1 ] && [ -d "${dirs[0]}" ]; then
+            candidate="${dirs[0]%/}"
+            if [ -f "$candidate/settings.gradle" ] || [ -f "$candidate/settings.gradle.kts" ] || [ -f "$candidate/build.gradle" ] || [ -f "$candidate/build.gradle.kts" ]; then
+              echo "BUILD_ROOT=$candidate" >> "$GITHUB_ENV"
+            else
+              echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
+          fi
+
+      - name: Make Gradle executable
+        working-directory: ${{ env.BUILD_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+          fi
+
+      - name: Build debug APK
+        working-directory: ${{ env.BUILD_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f ./gradlew ]; then
+            ./gradlew assembleDebug --stacktrace --no-daemon
+          elif command -v gradle >/dev/null 2>&1; then
+            gradle assembleDebug --stacktrace --no-daemon
+          else
+            echo 'No Gradle wrapper or system Gradle found in the extracted project.'
+            exit 1
+          fi
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$BUILD_ROOT" -type f -name '*.apk' -print
+          test -n "$(find "$BUILD_ROOT" -type f -name '*.apk' -print -quit)"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Neumor-debug-apk
+          path: ${{ env.BUILD_ROOT }}/**/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14
