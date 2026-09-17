@@ -13,8 +13,6 @@ env:
   PROJECT_DIR: android-project
   GRADLE_VERSION: '9.5'
 
-auto_cancel: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
