@@ -30,7 +30,6 @@ jobs:
           echo 'Extracted project:'
           find "$PROJECT_DIR" -maxdepth 4 -type f | head -100
 
-          # Detect a single top-level project directory inside the ZIP.
           shopt -s nullglob
           dirs=("$PROJECT_DIR"/*/)
           if [ ${#dirs[@]} -eq 1 ] && [ -d "${dirs[0]}" ]; then
@@ -60,14 +59,27 @@ jobs:
             chmod +x ./gradlew
           fi
 
+      - name: Force compatible Gradle version
+        working-directory: ${{ env.BUILD_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
+            sed -i -E 's#gradle-[0-9]+(\.[0-9]+)+-bin\.zip#gradle-9.5-bin.zip#g' gradle/wrapper/gradle-wrapper.properties
+            echo 'Gradle wrapper configuration:'
+            cat gradle/wrapper/gradle-wrapper.properties
+          fi
+
       - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
         run: |
           set -euo pipefail
           if [ -f ./gradlew ]; then
+            ./gradlew --version
             ./gradlew assembleDebug --stacktrace --no-daemon
           elif command -v gradle >/dev/null 2>&1; then
+            gradle --version
             gradle assembleDebug --stacktrace --no-daemon
           else
             echo 'No Gradle wrapper or system Gradle found in the extracted project.'
