@@ -11,7 +11,7 @@ permissions:
 env:
   ZIP_NAME: ModernLauncher_TecnoSpark8C_VivoY11_UX_v1.5.zip
   PROJECT_DIR: android-project
-  GRADLE_VERSION: '9.5'
+  GRADLE_VERSION: '9.5.1'
 
 jobs:
   build:
@@ -48,7 +48,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Gradle 9.5
+      - name: Install Gradle 9.5.1
         shell: bash
         run: |
           set -euo pipefail
@@ -66,7 +66,7 @@ jobs:
           if [ -f ./gradlew ]; then chmod +x ./gradlew; fi
           rm -rf .gradle
 
-      - name: Build debug APK with Gradle 9.5
+      - name: Build debug APK with Gradle 9.5.1
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
         run: |
