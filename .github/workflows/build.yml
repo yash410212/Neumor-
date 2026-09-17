@@ -5,9 +5,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 env:
   ZIP_NAME: ModernLauncher_TecnoSpark8C_VivoY11_UX_v1.5.zip
   PROJECT_DIR: android-project
@@ -16,8 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Extract Android project ZIP
         shell: bash
@@ -29,106 +25,74 @@ jobs:
           unzip -q "$ZIP_NAME" -d "$PROJECT_DIR"
           shopt -s nullglob
           dirs=("$PROJECT_DIR"/*/)
-          if [ ${#dirs[@]} -eq 1 ] && [ -d "${dirs[0]}" ]; then
-            candidate="${dirs[0]%/}"
-            if [ -f "$candidate/settings.gradle" ] || [ -f "$candidate/settings.gradle.kts" ] || [ -f "$candidate/build.gradle" ] || [ -f "$candidate/build.gradle.kts" ] || [ -f "$candidate/gradlew" ]; then
-              echo "BUILD_ROOT=$candidate" >> "$GITHUB_ENV"
-            else
-              echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
-            fi
+          if [ ${#dirs[@]} -eq 1 ] && [ -f "${dirs[0]}/settings.gradle" -o -f "${dirs[0]}/settings.gradle.kts" -o -f "${dirs[0]}/build.gradle" -o -f "${dirs[0]}/build.gradle.kts" ]; then
+            echo "BUILD_ROOT=${dirs[0]%/}" >> "$GITHUB_ENV"
           else
             echo "BUILD_ROOT=$PROJECT_DIR" >> "$GITHUB_ENV"
           fi
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
 
-      - name: Install Android SDK 36 platform
-        shell: bash
-        run: |
-          set -euo pipefail
-          sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.1'
 
-      - name: Prepare project
+      - name: Prepare and patch source
         working-directory: ${{ env.BUILD_ROOT }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f ./gradlew ]; then chmod +x ./gradlew; fi
-          rm -rf .gradle
-          while IFS= read -r -d '' file; do
-            sed -i -E 's/(compileSdk([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
-            sed -i -E 's/(compileSdkVersion([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
-          done < <(find . -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print0)
-
-      - name: Patch Kotlin source compatibility
-        working-directory: ${{ env.BUILD_ROOT }}
-        shell: bash
-        run: |
-          set -euo pipefail
+          find . -type f \( -name build.gradle -o -name build.gradle.kts \) -print0 | while IFS= read -r -d '' f; do
+            sed -i -E 's/(compileSdk[[:space:]]*=?[[:space:]]*)35\b/\136/g; s/(compileSdkVersion[[:space:]]*=?[[:space:]]*)35\b/\136/g' "$f"
+          done
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('app/src/main/java/com/example/modernlauncher/MainActivity.kt')
-          s = p.read_text()
-          s = s.replace('import androidx.compose.runtime.composed\n', '')
-          s = s.replace('import androidx.compose.foundation.rememberScrollState\n', 'import androidx.compose.foundation.rememberScrollState\nimport androidx.compose.foundation.horizontalScroll\n')
-          s = s.replace('import androidx.compose.material3.*\nimport androidx.compose.material3.isSystemInDarkTheme\n', 'import androidx.compose.material3.*\n')
-          s = s.replace('import androidx.compose.material3.*\n', 'import androidx.compose.material3.*\nimport androidx.compose.foundation.isSystemInDarkTheme\n')
-          s = s.replace('data class HomeWidgetRecord(\n    val appWidgetId: Int,\n    val page: Int,\n    val spanX: Int = 2,\n    val spanY: Int = 2\n)', 'data class HomeWidgetRecord(\n    val appWidgetId: Int,\n    val page: Int,\n    val spanX: Int = 2,\n    val spanY: Int = 2,\n    val providerKey: String = ""\n)')
-          s = s.replace('decodeIconScales(p.getString("iconScales", ""))', 'decodeIconScales(p.getString("iconScales", "").orEmpty())')
-          s = s.replace('decodeWidgets(p.getString("widgets_home", ""))', 'decodeWidgets(p.getString("widgets_home", "").orEmpty())')
-          s = s.replace('override fun onNewIntent(intent:Intent?){ super.onNewIntent(intent); setIntent(intent) }', 'override fun onNewIntent(intent:Intent){ super.onNewIntent(intent); setIntent(intent) }')
-          s = s.replace('onAddWidget={activity?.let { { it.pickWidget() } } ?: {}}', 'onAddWidget={ activity?.pickWidget(); Unit }')
-          s = s.replace('EdgeAction("Apps","Open app drawer",accent)', 'EdgeAction("Apps","Open app drawer",accent,muted)')
-          s = s.replace('EdgeAction("Settings","Launcher controls",accent)', 'EdgeAction("Settings","Launcher controls",accent,muted)')
-          s = s.replace('EdgeAction("Theme","Toggle light / dark",accent)', 'EdgeAction("Theme","Toggle light / dark",accent,muted)')
-          s = s.replace('EdgeAction("Grid","Change home grid",accent)', 'EdgeAction("Grid","Change home grid",accent,muted)')
-          s = s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){(LocalContext.current as? MainActivity)?.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){edgeContext.pickWallpaper();onClose()}')
-          s = s.replace('@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){', '@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){\n    val edgeContext=LocalContext.current')
-          s = s.replace('@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,onClick:()->Unit)', '@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,muted:Color,onClick:()->Unit)')
-          s = s.replace('@Composable private fun ThemeChoice(', '@Composable private fun RowScope.ThemeChoice(')
-          s = s.replace('val cell=((maxWidth.toPx()-gap*(cols-1))/cols).coerceAtLeast(1f)', 'val cell=(with(density){maxWidth.toPx()}-gap*(cols-1))/cols.coerceAtLeast(1).toFloat()')
-          s = s.replace('(86.dp.value*density+gap)', '(with(density){86.dp.toPx()}+gap)')
-          s = s.replace('private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=composedClickable(onClick)\n@Composable private fun composedClickable(onClick:()->Unit):Modifier{val interaction=remember{androidx.compose.foundation.interaction.MutableInteractionSource()};return Modifier.then(Modifier.clickable(interactionSource=interaction,indication=null,onClick=onClick))}', 'private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=Modifier.clickable(interactionSource=androidx.compose.foundation.interaction.MutableInteractionSource(),indication=null,onClick=onClick)')
-          s = s.replace('val dark=isSystemInDarkTheme()', 'val dark=androidx.compose.foundation.isSystemInDarkTheme()')
-          # Eliminate composable calls from non-composable draw/click lambdas by capturing values first.
-          start = s.find('@Composable private fun AnalogClock(')
-          if start >= 0:
-              end = s.find('\n@Composable', start + 20)
-              if end < 0: end = len(s)
-              block = s[start:end]
-              block = block.replace('val now=remember{mutableStateOf(Calendar.getInstance())}', 'val dark=androidx.compose.foundation.isSystemInDarkTheme()\n    val now=remember{mutableStateOf(Calendar.getInstance())}')
-              block = block.replace('androidx.compose.foundation.isSystemInDarkTheme()', 'dark')
-              s = s[:start] + block + s[end:]
+          p=Path('app/src/main/java/com/example/modernlauncher/MainActivity.kt')
+          s=p.read_text()
+          s=s.replace('import androidx.compose.runtime.composed\n','')
+          if 'import androidx.compose.foundation.horizontalScroll' not in s:
+              s=s.replace('import androidx.compose.foundation.rememberScrollState\n','import androidx.compose.foundation.rememberScrollState\nimport androidx.compose.foundation.horizontalScroll\n')
+          s=s.replace('import androidx.compose.material3.isSystemInDarkTheme\n','')
+          if 'import androidx.compose.foundation.isSystemInDarkTheme' not in s:
+              s=s.replace('import androidx.compose.material3.*\n','import androidx.compose.material3.*\nimport androidx.compose.foundation.isSystemInDarkTheme\n')
+          s=s.replace('val spanY: Int = 2\n)', 'val spanY: Int = 2,\n    val providerKey: String = ""\n)')
+          s=s.replace('p.getString("iconScales", "")', 'p.getString("iconScales", "").orEmpty()')
+          s=s.replace('p.getString("widgets_home", "")', 'p.getString("widgets_home", "").orEmpty()')
+          s=s.replace('onNewIntent(intent:Intent?)','onNewIntent(intent:Intent)')
+          s=s.replace('onAddWidget={activity?.let { { it.pickWidget() } } ?: {}}','onAddWidget={ activity?.pickWidget(); Unit }')
+          s=s.replace('@Composable private fun ThemeChoice(', '@Composable private fun RowScope.ThemeChoice(')
+          s=s.replace('private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=composedClickable(onClick)\n@Composable private fun composedClickable(onClick:()->Unit):Modifier{val interaction=remember{androidx.compose.foundation.interaction.MutableInteractionSource()};return Modifier.then(Modifier.clickable(interactionSource=interaction,indication=null,onClick=onClick))}', 'private fun Modifier.clickableWithoutRipple(onClick:()->Unit)=Modifier.clickable(interactionSource=androidx.compose.foundation.interaction.MutableInteractionSource(),indication=null,onClick=onClick)')
+          s=s.replace('val cell=((maxWidth.toPx()-gap*(cols-1))/cols).coerceAtLeast(1f)', 'val cell=(with(density){maxWidth.toPx()}-gap*(cols-1))/cols.coerceAtLeast(1).toFloat()')
+          s=s.replace('(86.dp.value*density+gap)', '(with(density){86.dp.toPx()}+gap)')
+          # Keep wallpaper call inside Activity receiver rather than LocalContext lookup in a draw/callback expression.
+          s=s.replace('(LocalContext.current as? MainActivity)?.pickWallpaper()', 'edgeContext.pickWallpaper()')
+          s=s.replace('@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){', '@Composable private fun EdgePanel(vm:LauncherViewModel,bg:Color,surface:Color,text:Color,muted:Color,accent:Color,onClose:()->Unit){\n    val edgeContext=LocalContext.current')
+          # Fix EdgeAction parameter mismatches without changing UI.
+          s=s.replace('EdgeAction("Apps","Open app drawer",accent)', 'EdgeAction("Apps","Open app drawer",accent,muted)')
+          s=s.replace('EdgeAction("Settings","Launcher controls",accent)', 'EdgeAction("Settings","Launcher controls",accent,muted)')
+          s=s.replace('EdgeAction("Theme","Toggle light / dark",accent)', 'EdgeAction("Theme","Toggle light / dark",accent,muted)')
+          s=s.replace('EdgeAction("Grid","Change home grid",accent)', 'EdgeAction("Grid","Change home grid",accent,muted)')
+          s=s.replace('EdgeAction("Wallpaper","Choose wallpaper",accent){edgeContext.pickWallpaper();onClose()}', 'EdgeAction("Wallpaper","Choose wallpaper",accent,muted){edgeContext.pickWallpaper();onClose()}')
+          s=s.replace('@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,onClick:()->Unit)', '@Composable private fun EdgeAction(title:String,subtitle:String,accent:Color,muted:Color,onClick:()->Unit)')
           p.write_text(s)
           PY
 
       - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gradle assembleDebug --stacktrace --no-daemon
+        run: gradle assembleDebug --stacktrace --no-daemon
 
       - name: Find APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          find "$BUILD_ROOT" -type f -name '*.apk' -print
-          test -n "$(find "$BUILD_ROOT" -type f -name '*.apk' -print -quit)"
+        run: test -n "$(find "$BUILD_ROOT" -type f -name '*.apk' -print -quit)"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
