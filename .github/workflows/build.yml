@@ -57,6 +57,7 @@ jobs:
           done < <(find . -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print0)
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('app/src/main/java/com/example/modernlauncher/MainActivity.kt')
           s=p.read_text()
           s=s.replace('import androidx.compose.runtime.composed\n','')
@@ -94,12 +95,12 @@ jobs:
               s=s[:start]+block+s[end:]
           names=['IconSize','IconShape','AnimationValue','AnimationDuration','AnimationType','IconPadding','TouchResponse','SettingsPage','DrawerListMode','DrawerCategory','CurrentHomePage','PerformanceMode','ProductiveMode','StudyMode']
           for name in names:
-              s=s.replace(f'fun set{name}(', f'fun update{name}(')
-              s=s.replace(f'.set{name}(', f'.update{name}(')
-              s=s.replace(f' set{name}(', f' update{name}(')
-              s=s.replace(f'({name}=', f'({name}=')
+              s=re.sub(r'\bset'+name+r'\b', 'update'+name, s)
           p.write_text(s)
-          print('Setter declarations/calls normalized')
+          leftovers=[name for name in names if re.search(r'\bset'+name+r'\b', s)]
+          if leftovers:
+              raise SystemExit('Setter references remain: '+', '.join(leftovers))
+          print('All targeted setter references normalized')
           PY
       - name: Build debug APK
         working-directory: ${{ env.BUILD_ROOT }}
