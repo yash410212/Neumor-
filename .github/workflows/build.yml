@@ -46,14 +46,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK 36
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK 36 platform
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platforms;android-36"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -67,14 +70,10 @@ jobs:
           set -euo pipefail
           if [ -f ./gradlew ]; then chmod +x ./gradlew; fi
           rm -rf .gradle
-
-          # AndroidX Activity 1.11.x requires compileSdk 36+.
-          # Keep minSdk/targetSdk unchanged so Android 11 compatibility is preserved.
           while IFS= read -r -d '' file; do
             sed -i -E 's/(compileSdk([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
             sed -i -E 's/(compileSdkVersion([[:space:]]*=?[[:space:]]*)?)35\b/\136/g' "$file"
           done < <(find . -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print0)
-
           echo "Effective compileSdk declarations:"
           grep -RInE 'compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+' --include='build.gradle' --include='build.gradle.kts' . || true
           gradle --version
